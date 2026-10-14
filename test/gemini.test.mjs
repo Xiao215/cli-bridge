@@ -72,7 +72,7 @@ test("images and PDFs are saved in the request's folder, then removed", async ()
   const { prompt } = lastCall();
   assert.match(prompt, /compare\n\[attached: attachment-1\.png\]\n\[attached: attachment-2\.pdf \(notes\.pdf\)\]$/);
   assert.match(prompt, /open them with view_file/);
-  const root = path.join(tmpdir(), "claude-api-gemini");
+  const root = path.join(tmpdir(), "cli-bridge-gemini");
   assert.ok(!existsSync(root) || readdirSync(root).length === 0);
 });
 

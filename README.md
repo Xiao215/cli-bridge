@@ -1,4 +1,4 @@
-# claude-api
+# cli-bridge
 
 Use **Claude Code** from your own scripts and tools. A small local server speaks the
 **OpenAI** and **Anthropic** API formats, so code that already talks to either one
@@ -6,7 +6,7 @@ switches over by changing its base URL. Requests run on your Claude Pro/Max
 subscription.
 
 ```
-your script ──HTTP──▶ claude-api (localhost:8787) ──▶ `claude` CLI (signed in as you) ──▶ Claude
+your script ──HTTP──▶ cli-bridge (localhost:8787) ──▶ `claude` CLI (signed in as you) ──▶ Claude
 ```
 
 Each request runs the official, unmodified `claude` CLI on your machine. No
@@ -55,7 +55,7 @@ claude            # once: type /login, finish in the browser, then /exit
 Then:
 
 ```bash
-git clone https://github.com/Xiao215/claude-api && cd claude-api
+git clone https://github.com/Xiao215/cli-bridge && cd cli-bridge
 cp .env.example .env    # optional: defaults are fine
 npm start
 ```
@@ -64,7 +64,7 @@ It prints the base URLs to paste into your app, and warns if Claude Code isn't
 installed or signed in:
 
 ```
-claude-api listening on http://127.0.0.1:8787
+cli-bridge listening on http://127.0.0.1:8787
   Signed in to Claude (max plan) as you@example.com
 
   OpenAI SDKs      base_url = http://127.0.0.1:8787/v1
@@ -79,7 +79,7 @@ systemd user service):
 npm run install-service      # undo: npm run uninstall-service
 ```
 
-Logs: `~/Library/Logs/claude-api.log` on macOS, `journalctl --user -u claude-api -f`
+Logs: `~/Library/Logs/cli-bridge.log` on macOS, `journalctl --user -u cli-bridge -f`
 on Linux. On Windows, `npm start` should work but is untested. WSL is the safer bet.
 
 ## Connect your apps
@@ -126,7 +126,7 @@ export OPENAI_BASE_URL=http://127.0.0.1:8787/v1 OPENAI_API_KEY=unused
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8787 ANTHROPIC_API_KEY=unused
 ```
 
-(This doesn't affect claude-api itself: the `claude` it runs always uses your claude.ai
+(This doesn't affect cli-bridge itself: the `claude` it runs always uses your claude.ai
 login and never sees these variables.)
 
 ## Gemini (optional)
@@ -140,7 +140,7 @@ curl -fsSL https://antigravity.google/cli/install.sh | bash
 agy            # once: sign in with your Google account in the browser, then quit
 ```
 
-At startup claude-api lists the Gemini models your account has (`agy models` shows them
+At startup cli-bridge lists the Gemini models your account has (`agy models` shows them
 too), e.g. `gemini-3.8-flash-high`. Use one of those names, or just `gemini` to let agy
 pick. They also appear in `GET /v1/models`.
 
@@ -148,7 +148,7 @@ pick. They also appear in `GET /v1/models`.
 r = client.chat.completions.create(model="gemini-3.8-flash-medium", messages=[...])
 ```
 
-The same personal-use rule applies: your Google AI plan is for you. claude-api only runs
+The same personal-use rule applies: your Google AI plan is for you. cli-bridge only runs
 the official, unmodified `agy` binary in its documented headless mode and never touches
 its sign-in. Google's terms forbid third-party tools that use Antigravity's sign-in
 directly, and Google hasn't said either way whether a local wrapper like this one is
@@ -267,7 +267,7 @@ server is where you decide how much of your data an agent can reach.
 
 ## Configuration (`.env`)
 
-`.env` is read from the folder you start claude-api in. Real environment variables win.
+`.env` is read from the folder you start cli-bridge in. Real environment variables win.
 
 | Variable | Default | |
 |---|---|---|

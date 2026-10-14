@@ -1,12 +1,12 @@
 {
-  "name": "claude-api",
+  "name": "cli-bridge",
   "version": "1.0.0",
-  "description": "Use Claude Code from your own scripts and tools through local OpenAI- and Anthropic-compatible APIs",
+  "description": "Use Claude Code (and optionally Gemini) from your own scripts and tools through local OpenAI- and Anthropic-compatible APIs",
   "type": "module",
   "private": true,
   "license": "MIT",
   "engines": { "node": ">=22" },
-  "bin": { "claude-api": "server.mjs" },
+  "bin": { "cli-bridge": "server.mjs" },
   "files": ["server.mjs", "lib/", "scripts/", ".env.example"],
   "scripts": {
     "start": "node server.mjs",

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// claude-api: a small local service that lets your own scripts and tools use
+// cli-bridge: a small local service that lets your own scripts and tools use
 // Claude Code (and, optionally, Gemini through the Antigravity CLI) through the
 // OpenAI and Anthropic API formats, so they work by changing only their base URL.
 //
@@ -139,7 +139,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.on("error", (e) => {
-  console.error(e.code === "EADDRINUSE" ? `Port ${PORT} is already in use — is claude-api already running? Set PORT to pick another.` : e.message);
+  console.error(e.code === "EADDRINUSE" ? `Port ${PORT} is already in use — is cli-bridge already running? Set PORT to pick another.` : e.message);
   process.exit(1);
 });
 server.listen(PORT, HOST, async () => {
@@ -150,7 +150,7 @@ server.listen(PORT, HOST, async () => {
 function banner(login, gemini) {
   const local = ["0.0.0.0", "::"].includes(HOST) ? "127.0.0.1" : HOST.includes(":") ? `[${HOST}]` : HOST;
   const url = `http://${local}:${PORT}`;
-  const lines = [`claude-api listening on ${url}`];
+  const lines = [`cli-bridge listening on ${url}`];
 
   if (login?.missing) {
     lines.push(

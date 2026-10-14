@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run claude-api in the background: starts at login, restarts if it crashes.
+# Run cli-bridge in the background: starts at login, restarts if it crashes.
 # macOS uses launchd, Linux a systemd user service. Undo with scripts/uninstall-service.sh
 set -euo pipefail
 
@@ -12,9 +12,13 @@ if AGY="$(command -v agy)"; then SERVICE_PATH="$(dirname "$AGY"):$SERVICE_PATH";
 
 case "$(uname -s)" in
 Darwin)
-  LABEL="com.$(whoami).claude-api"
+  # claude-api is this project's old name: stop that service so the two don't share the port.
+  OLD="com.$(whoami).claude-api"
+  launchctl bootout "gui/$(id -u)/$OLD" 2>/dev/null || true
+  rm -f "$HOME/Library/LaunchAgents/$OLD.plist"
+  LABEL="com.$(whoami).cli-bridge"
   PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-  LOG="$HOME/Library/Logs/claude-api.log"
+  LOG="$HOME/Library/Logs/cli-bridge.log"
   mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
   cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -46,10 +50,13 @@ EOF
   ;;
 Linux)
   UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+  # claude-api is this project's old name: stop that service so the two don't share the port.
+  systemctl --user disable --now claude-api.service 2>/dev/null || true
+  rm -f "$UNIT_DIR/claude-api.service"
   mkdir -p "$UNIT_DIR"
-  cat > "$UNIT_DIR/claude-api.service" <<EOF
+  cat > "$UNIT_DIR/cli-bridge.service" <<EOF
 [Unit]
-Description=claude-api: Claude Code as a local API
+Description=cli-bridge: Claude Code and Gemini CLIs as a local API
 After=network-online.target
 
 [Service]
@@ -63,9 +70,9 @@ RestartSec=5
 WantedBy=default.target
 EOF
   systemctl --user daemon-reload
-  systemctl --user enable --now claude-api.service
-  echo "Installed claude-api.service — running from $DIR"
-  echo "Logs: journalctl --user -u claude-api -f"
+  systemctl --user enable --now cli-bridge.service
+  echo "Installed cli-bridge.service — running from $DIR"
+  echo "Logs: journalctl --user -u cli-bridge -f"
   echo "To keep it running while you're logged out: loginctl enable-linger $USER"
   ;;
 *)
