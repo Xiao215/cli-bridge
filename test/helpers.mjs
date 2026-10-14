@@ -1,4 +1,4 @@
-// Starts the server against test/fake-claude.mjs, so tests run offline.
+// Starts the server against test/fake-claude.mjs and test/fake-agy.mjs, so tests run offline.
 import { before, after } from "node:test";
 import { spawn } from "node:child_process";
 import { chmodSync } from "node:fs";
@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const FAKE = fileURLToPath(new URL("./fake-claude.mjs", import.meta.url));
+const FAKE_AGY = fileURLToPath(new URL("./fake-agy.mjs", import.meta.url));
 const SERVER = fileURLToPath(new URL("../server.mjs", import.meta.url));
 export const KEY = "test-key";
 
@@ -14,9 +15,10 @@ export function useServer(port, env = {}) {
   let server;
   before(async () => {
     chmodSync(FAKE, 0o755);
+    chmodSync(FAKE_AGY, 0o755);
     server = spawn(process.execPath, [SERVER], {
       cwd: tmpdir(), // so a developer's own .env isn't picked up
-      env: { ...process.env, PORT: String(port), API_KEY: KEY, CLAUDE_CLI: FAKE, DEFAULT_MODEL: "sonnet", TIMEOUT_SECONDS: "2", ...env },
+      env: { ...process.env, PORT: String(port), API_KEY: KEY, CLAUDE_CLI: FAKE, AGY_CLI: FAKE_AGY, DEFAULT_MODEL: "sonnet", TIMEOUT_SECONDS: "2", ...env },
       stdio: ["ignore", "pipe", "pipe"],
     });
     await new Promise((resolve, reject) => {
@@ -38,9 +40,10 @@ export function useServer(port, env = {}) {
 // Starts a server just to read what it prints at startup, then stops it.
 export async function startupMessage(port, env = {}) {
   chmodSync(FAKE, 0o755);
+  chmodSync(FAKE_AGY, 0o755);
   const server = spawn(process.execPath, [SERVER], {
     cwd: tmpdir(),
-    env: { ...process.env, PORT: String(port), CLAUDE_CLI: FAKE, ...env },
+    env: { ...process.env, PORT: String(port), CLAUDE_CLI: FAKE, AGY_CLI: FAKE_AGY, ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";

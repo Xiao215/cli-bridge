@@ -7,6 +7,8 @@ DIR="$(cd "$(dirname "$0")/.." && pwd)"
 NODE="$(command -v node)" || { echo "node not found on PATH"; exit 1; }
 CLAUDE="$(command -v claude)" || { echo "claude not found on PATH — install Claude Code first"; exit 1; }
 SERVICE_PATH="$(dirname "$CLAUDE"):$(dirname "$NODE"):/usr/bin:/bin"
+# Optional: the Antigravity CLI, for gemini-* models.
+if AGY="$(command -v agy)"; then SERVICE_PATH="$(dirname "$AGY"):$SERVICE_PATH"; fi
 
 case "$(uname -s)" in
 Darwin)

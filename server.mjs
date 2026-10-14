@@ -1,23 +1,25 @@
 #!/usr/bin/env node
 // claude-api: a small local service that lets your own scripts and tools use
-// Claude Code through the OpenAI and Anthropic API formats, so they work by
-// changing only their base URL.
+// Claude Code (and, optionally, Gemini through the Antigravity CLI) through the
+// OpenAI and Anthropic API formats, so they work by changing only their base URL.
 //
-// Every request runs the official, unmodified `claude` CLI on this machine,
-// signed in with your own account. Personal use only: your Pro/Max plan is
-// for you, so don't serve other people's requests through it (see README).
+// Every request runs an official, unmodified CLI on this machine (`claude`, or
+// `agy` for gemini-* models), signed in with your own account. Personal use
+// only: your plan is for you, so don't serve other people's requests through
+// it (see README).
 
 import http from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import {
-  ALLOWED_ORIGINS, API_KEY, CLAUDE_CLI, DEFAULT_MODEL, DEFAULT_SYSTEM, HOST, MAX_CONCURRENT, MODELS, PORT, TOOLS,
+  AGY_CLI, ALLOWED_ORIGINS, API_KEY, CLAUDE_CLI, DEFAULT_MODEL, DEFAULT_SYSTEM, HOST, MAX_CONCURRENT, MODELS, PORT, TOOLS,
 } from "./lib/config.mjs";
-import {
-  HttpError, checkLogin, effortOf, liveStats, maxTurnsOf, modelOf, outputOf, resolveModel, runClaude, stats, toolServers, usageOf,
-} from "./lib/claude.mjs";
+import { checkLogin, effortOf, maxTurnsOf, resolveModel, toolServers } from "./lib/claude.mjs";
+import { liveStats, modelOf, outputOf, stats, usageOf } from "./lib/cli.mjs";
+import { isGemini, runModel } from "./lib/backends.mjs";
+import { checkGeminiLogin, geminiModels } from "./lib/gemini.mjs";
 import { anthropicErrorType, messages } from "./lib/anthropic.mjs";
 import { chatCompletions } from "./lib/openai.mjs";
-import { disconnectSignal, readJson, sendJson } from "./lib/http.mjs";
+import { HttpError, disconnectSignal, readJson, sendJson } from "./lib/http.mjs";
 
 const LOOPBACK = ["127.0.0.1", "localhost", "::1"];
 if (!LOOPBACK.includes(HOST) && !API_KEY) {
@@ -32,7 +34,7 @@ async function ask(req, res) {
   const body = await readJson(req);
   if (!body.prompt || typeof body.prompt !== "string") throw new HttpError(400, 'Send JSON like {"prompt": "hi"}');
   const model = resolveModel(body.model);
-  const result = await runClaude({
+  const result = await runModel({
     system: body.system || DEFAULT_SYSTEM,
     content: [{ type: "text", text: body.prompt }],
     model,
@@ -54,7 +56,7 @@ async function ask(req, res) {
 
 // The Anthropic SDKs send an anthropic-version header and expect their own shape.
 function models(req, res) {
-  const ids = [...new Set([DEFAULT_MODEL, ...MODELS])];
+  const ids = [...new Set([DEFAULT_MODEL, ...MODELS, ...geminiModels])];
   if (req.headers["anthropic-version"]) {
     const created_at = new Date().toISOString();
     return sendJson(res, 200, {
@@ -65,7 +67,7 @@ function models(req, res) {
     });
   }
   const created = Math.floor(Date.now() / 1000);
-  sendJson(res, 200, { object: "list", data: ids.map((id) => ({ id, object: "model", created, owned_by: "anthropic" })) });
+  sendJson(res, 200, { object: "list", data: ids.map((id) => ({ id, object: "model", created, owned_by: isGemini(id) ? "google" : "anthropic" })) });
 }
 
 const responses = {};
@@ -141,11 +143,11 @@ server.on("error", (e) => {
   process.exit(1);
 });
 server.listen(PORT, HOST, async () => {
-  console.log(banner(await checkLogin()));
+  console.log(banner(...(await Promise.all([checkLogin(), checkGeminiLogin()]))));
 });
 
 // What to paste into your app, and anything that will stop requests working.
-function banner(login) {
+function banner(login, gemini) {
   const local = ["0.0.0.0", "::"].includes(HOST) ? "127.0.0.1" : HOST.includes(":") ? `[${HOST}]` : HOST;
   const url = `http://${local}:${PORT}`;
   const lines = [`claude-api listening on ${url}`];
@@ -163,6 +165,15 @@ function banner(login) {
     if (/api.?key/i.test(login.authMethod || "")) {
       lines.push("  ⚠ Claude Code is using an API key, so requests are billed per token, not to your subscription.");
     }
+  }
+
+  // Gemini is optional, so a missing agy is just a hint.
+  if (gemini?.missing) {
+    lines.push(`  Gemini: optional. Install the Antigravity CLI ("${AGY_CLI}") to use gemini-* models too.`);
+  } else if (gemini && !gemini.loggedIn) {
+    lines.push("  ⚠ The Antigravity CLI isn't signed in, so gemini-* models will fail. Run `agy` once to sign in.");
+  } else if (gemini) {
+    lines.push(`  Gemini via the Antigravity CLI: ${gemini.models.join(", ") || "gemini"}`);
   }
 
   lines.push(

@@ -10,7 +10,8 @@ your script ──HTTP──▶ claude-api (localhost:8787) ──▶ `claude` C
 ```
 
 Each request runs the official, unmodified `claude` CLI on your machine. No
-dependencies: just Node 22+ and Claude Code.
+dependencies: just Node 22+ and Claude Code. Optionally, `gemini-*` models run on your
+Google account the same way, through the official Antigravity CLI (see [Gemini](#gemini-optional)).
 
 ```bash
 $ curl -s localhost:8787/ask -H 'Content-Type: application/json' \
@@ -38,6 +39,7 @@ point it at Anthropic's API rather than at this service.
 - Thinking effort per request
 - Attaching your own local MCP tool servers, so Claude runs a whole agent loop
 - Model names mapped for you (`gpt-4o-mini` → haiku), or your own aliases
+- Optionally, Gemini models (`gemini-*`) through the Antigravity CLI, in the same API formats
 - `/stats`: tokens used since start, plus how much of your 5-hour and weekly plan
   windows you've used
 
@@ -126,6 +128,48 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:8787 ANTHROPIC_API_KEY=unused
 
 (This doesn't affect claude-api itself: the `claude` it runs always uses your claude.ai
 login and never sees these variables.)
+
+## Gemini (optional)
+
+With the [Antigravity CLI](https://antigravity.google/docs/cli/install/) (`agy`) installed
+and signed in, any request whose model starts with `gemini` runs on your Google account
+instead of Claude, through the same endpoints:
+
+```bash
+curl -fsSL https://antigravity.google/cli/install.sh | bash
+agy            # once: sign in with your Google account in the browser, then quit
+```
+
+At startup claude-api lists the Gemini models your account has (`agy models` shows them
+too), e.g. `gemini-3.8-flash-high`. Use one of those names, or just `gemini` to let agy
+pick. They also appear in `GET /v1/models`.
+
+```python
+r = client.chat.completions.create(model="gemini-3.8-flash-medium", messages=[...])
+```
+
+The same personal-use rule applies: your Google AI plan is for you. claude-api only runs
+the official, unmodified `agy` binary in its documented headless mode and never touches
+its sign-in. Google's terms forbid third-party tools that use Antigravity's sign-in
+directly, and Google hasn't said either way whether a local wrapper like this one is
+allowed. (The older Gemini CLI no longer accepts personal Google accounts, which is why
+this uses agy.)
+
+agy is a coding agent, not a bare model, so a few things differ from Claude:
+
+- Each request runs in its own empty folder with `--sandbox`: commands and file reads stay
+  inside that folder, and anything needing permission is denied (headless mode can't ask).
+  Images and PDFs are saved into that folder for Gemini to open, and the folder is deleted
+  afterwards.
+- agy has no system-prompt flag, so your system prompt goes at the top of the message,
+  after a short note telling Gemini to answer as a chat model. agy's own instructions still
+  apply, which adds roughly 12k input tokens to every request.
+- Gemini can always reach agy's web search. Without `web_search_options` (or a web search
+  tool, or `"web_search": true`), the message tells it not to use it, but nothing enforces that.
+- Tool calling, structured JSON, images, PDFs, streaming and effort work. `mcp_servers` and
+  `max_turns` are refused (HTTP 400).
+- agy keeps a history of every conversation in `~/.gemini/antigravity-cli`, as it does for
+  your own sessions. There's no flag to turn that off.
 
 ## Features
 
@@ -237,8 +281,11 @@ server is where you decide how much of your data an agent can reach.
 | `TIMEOUT_SECONDS` | `300` | |
 | `ALLOWED_ORIGINS` | none | Requests carrying a browser `Origin` are refused unless listed, so a web page can't spend your subscription |
 | `CLAUDE_CLI` | `claude` | Full path, if it isn't on `PATH` |
+| `AGY_CLI` | `agy` | The Antigravity CLI, for `gemini-*` models. Full path if it isn't on `PATH` (e.g. `~/.local/bin/agy` under a background service) |
 
-Without your own aliases, names that don't mention a Claude model are mapped by size:
+Names starting with `gemini` go to Gemini unchanged (an alias can point at one too, e.g.
+`gpt-4o=gemini-3.8-flash-high`). Without your own aliases, names that don't mention a
+Claude model are mapped by size:
 `*-mini`, `*-nano`, `*-flash`, `*-lite` → haiku. `o1`/`o3`-style, `*-pro` and `*-large` → opus.
 Everything else → `DEFAULT_MODEL`.
 
@@ -264,6 +311,9 @@ With it off, Anthropic keeps your chats 30 days and doesn't train on them. With 
 it keeps them 5 years and may use them for training. Turn it off before sending
 personal data.
 
+Requests to `gemini-*` models go to Google instead, under your Google account's own
+privacy settings.
+
 For data that must never leave your machine, point your app at a local model instead
 (e.g. Ollama, which serves an OpenAI-compatible API at `http://127.0.0.1:11434/v1`).
 
@@ -279,7 +329,7 @@ For data that must never leave your machine, point your app at a local model ins
 - Ignored: `temperature`, `top_p`, `max_tokens`, `stop`, `n` (only one choice).
   Not supported: audio, files other than PDFs, uploaded file ids, remote image/PDF URLs, Anthropic server tools other than
   web search and web fetch, `/v1/messages/count_tokens`.
-- Runs only where `claude` is signed in, i.e. your machine.
+- Runs only where `claude` (and `agy`, for Gemini) is signed in, i.e. your machine.
 
 ## Troubleshooting
 
@@ -287,6 +337,8 @@ For data that must never leave your machine, point your app at a local model ins
 |---|---|
 | `503` … "run `claude` then /login" | The CLI is signed out. Run `claude`, type `/login`, then `/exit`. |
 | `429` | You've reached your plan's usage window. Check `/stats` → `plan.windows` for when it resets. |
+| `503` … "run `agy` on the host to sign in" | The Antigravity CLI is signed out. Run `agy` and sign in. |
+| `502` "Gemini tried to use RunCommand…" | Gemini tried a command that needs permission, which headless mode denies. Retry, or reword the request so it doesn't need one. |
 | `Could not run "claude"` | `claude` isn't on `PATH` for this process (common under a background service). Set `CLAUDE_CLI` to the output of `which claude`, or rerun `npm run install-service`. |
 | `403` "Requests from web pages" | Calls from a browser page are blocked by default. Add the page's origin to `ALLOWED_ORIGINS` if you mean it. |
 | `504` | The request took longer than `TIMEOUT_SECONDS`. |
@@ -295,9 +347,11 @@ For data that must never leave your machine, point your app at a local model ins
 ## Development
 
 ```bash
-npm test   # offline: uses test/fake-claude.mjs, no Claude account or requests
+npm test   # offline: uses test/fake-claude.mjs and test/fake-agy.mjs, no accounts or requests
 ```
 
 The code is small: `server.mjs` (routes), `lib/openai.mjs` and `lib/anthropic.mjs`
 (the two API formats), `lib/conversation.mjs` (turning either into one prompt, and
-tool calls), `lib/claude.mjs` (running the CLI).
+tool calls), `lib/backends.mjs` (which CLI answers), `lib/claude.mjs` and
+`lib/gemini.mjs` (running `claude` and `agy`), `lib/cli.mjs` (what they share:
+processes, the concurrency limit, stats).

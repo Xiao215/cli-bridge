@@ -104,10 +104,11 @@ test("a request abandoned while waiting in the queue never runs", async () => {
   assert.doesNotMatch(readFileSync(LOG, "utf8"), /QUEUED_THEN_ABANDONED/);
 });
 
-test("models list, in both formats", async () => {
+test("models list, in both formats, with the Gemini models agy offers", async () => {
   const auth = { Authorization: `Bearer ${KEY}` };
   const openai = await (await fetch(`${base}/v1/models`, { headers: auth })).json();
-  assert.deepEqual(openai.data.map((m) => m.id), ["sonnet", "haiku", "opus", "fable"]);
+  assert.deepEqual(openai.data.map((m) => m.id), ["sonnet", "haiku", "opus", "fable", "gemini-9-flash-high"]);
+  assert.deepEqual(openai.data.map((m) => m.owned_by), ["anthropic", "anthropic", "anthropic", "anthropic", "google"]);
   const anthropic = await (await fetch(`${base}/v1/models`, { headers: { ...auth, "anthropic-version": "2023-06-01" } })).json();
   assert.equal(anthropic.data[0].type, "model");
   assert.equal(anthropic.has_more, false);
