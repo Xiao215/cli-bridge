@@ -41,8 +41,16 @@ const text =
 
 // With tools offered (a schema with tool_calls), CALL_TOOL makes it call the
 // first tool it's allowed to; otherwise it replies in `content`.
+// WRITE_FIRST: Claude writes its answer as text, then calls StructuredOutput
+// with only a note pointing at it (WRITE_FIRST_CALL: then calls a tool).
+const written = prompt.includes("WRITE_FIRST") ? `Worked it out.\n<answer>42</answer>` : null;
 let structured;
-if (schema?.properties?.tool_calls) {
+if (written && schema?.properties?.tool_calls) {
+  const tool = schema.properties.tool_calls.items.anyOf[0].properties.name.const;
+  structured = prompt.includes("WRITE_FIRST_CALL")
+    ? { type: "tool_calls", content: "", tool_calls: [{ name: tool, arguments: { city: "Paris" } }] }
+    : { type: "message", content: "See the answer above." };
+} else if (schema?.properties?.tool_calls) {
   const tool = schema.properties.tool_calls.items.anyOf[0].properties.name.const;
   const mustCall = !schema.properties.type.enum.includes("message");
   structured =
@@ -91,6 +99,12 @@ if (args.includes("--include-partial-messages")) {
   });
 }
 for (const b of reply) assistant("msg_final", b);
+if (written) {
+  // As the real CLI prints it: the text, then the StructuredOutput call, in one message.
+  assistant("msg_final", { type: "thinking", thinking: "Planning the answer." });
+  assistant("msg_final", { type: "text", text: written });
+  assistant("msg_final", { type: "tool_use", id: "toolu_so", name: "StructuredOutput", input: structured });
+}
 if (prompt.includes("FAIL_MIDSTREAM")) fail("Claude broke off mid-reply");
 out({
   type: "result",

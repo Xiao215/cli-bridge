@@ -196,6 +196,8 @@ your tools are described in the system prompt as ones the caller runs, Claude an
 through a JSON schema that is either a reply or a list of calls, and the arguments are
 validated against each tool's `parameters`. With tools offered, the
 reply arrives in one piece at the end even when streaming.
+If Claude writes text before giving that answer (sometimes its whole reply, followed by
+only a note like "See the answer above."), the text comes back first, then the note.
 
 Tools and a structured reply work together, as on the real APIs: pass `tools` with
 `response_format: {"type": "json_schema", …}` (or Anthropic's `output_config.format`) and
