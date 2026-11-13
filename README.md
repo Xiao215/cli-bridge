@@ -240,6 +240,10 @@ Anthropic: `output_config={"format": {"type": "json_schema", "schema": {...}}}`.
 OpenAI's `reasoning_effort`, Anthropic's `output_config.effort`, or `effort` on `/ask`:
 `low` | `medium` | `high` | `xhigh` | `max`. The default comes from `EFFORT`.
 
+Claude's thinking comes back as a summary in `reasoning_content` (OpenAI format, beside
+`content`, and as `reasoning_content` deltas when streaming). It is never part of the reply
+text. Set `THINKING_SUMMARIES=0` to leave it out. Gemini models return no thinking text.
+
 ### Agents: attaching MCP tool servers (non-standard extension)
 
 All three endpoints also accept:
@@ -277,6 +281,7 @@ server is where you decide how much of your data an agent can reach.
 | `MODEL_ALIASES` | none | Your own names, e.g. `gpt-4o-mini=haiku,gpt-4o=sonnet` |
 | `TOOLS` | none | e.g. `WebSearch,WebFetch` to let Claude search the web. Files and shell are never enabled. |
 | `EFFORT` | CLI default | `low` … `max` thinking effort |
+| `THINKING_SUMMARIES` | on | Return summaries of Claude's thinking as `reasoning_content`; `0` to turn off |
 | `MAX_CONCURRENT` | `2` | Extra requests wait in line |
 | `TIMEOUT_SECONDS` | `300` | |
 | `ALLOWED_ORIGINS` | none | Requests carrying a browser `Origin` are refused unless listed, so a web page can't spend your subscription |

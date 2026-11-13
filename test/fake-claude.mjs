@@ -37,7 +37,7 @@ const text =
   `echo model=${model} effort=${opt("--effort") ?? ""} tools=${JSON.stringify(opt("--tools"))} images=${JSON.stringify(images)} ` +
   (documents.length ? `documents=${JSON.stringify(documents)} ` : "") +
   `anthropic_env=${JSON.stringify(Object.keys(process.env).filter((k) => k.startsWith("ANTHROPIC_")))} ` +
-  `system=${JSON.stringify(system)} prompt=${JSON.stringify(prompt)}${extras}`;
+  `thinking_display=${opt("--thinking-display") ?? ""} system=${JSON.stringify(system)} prompt=${JSON.stringify(prompt)}${extras}`;
 
 // With tools offered (a schema with tool_calls), CALL_TOOL makes it call the
 // first tool it's allowed to; otherwise it replies in `content`.
@@ -55,21 +55,47 @@ if (schema?.properties?.tool_calls) {
   structured = { ok: true, schema };
 }
 
+// The final reply's content blocks. Like the real CLI, `result` below is only
+// the last text block. MULTI_BLOCK: Claude thinks between two text blocks and
+// ends with a short note after its answer.
+const MULTI = [
+  { type: "thinking", thinking: "Weighing the options." },
+  { type: "text", text: `Part one. ${text}\n<answer>A</answer>` },
+  { type: "thinking", thinking: "Checking once more." },
+  { type: "text", text: "Closing note." },
+];
+const reply = structured ? [] : prompt.includes("MULTI_BLOCK") ? MULTI : [{ type: "thinking", thinking: "hmm" }, { type: "text", text }];
+const finalText = reply.filter((b) => b.type === "text").at(-1)?.text;
+const assistant = (id, block, parent = null) =>
+  out({ type: "assistant", message: { id, model: `claude-${model}-test`, role: "assistant", content: [block] }, parent_tool_use_id: parent });
+
 out({ type: "system", subtype: "init", model: `claude-${model}-test` });
 out({ type: "rate_limit_event", rate_limit_info: { status: "allowed", unifiedWindows: { five_hour: { utilization: 0.07, resetsAt: 1791078000 } } } });
-if (args.includes("--include-partial-messages")) {
-  // A thinking delta and a sub-agent delta that must NOT reach the client.
-  out({ type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_delta", delta: { type: "thinking_delta", thinking: "hmm" } } });
-  out({ type: "stream_event", parent_tool_use_id: "toolu_x", event: { type: "content_block_delta", delta: { type: "text_delta", text: "SUBAGENT" } } });
-  for (const piece of text.match(/.{1,20}/gs)) {
-    out({ type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_delta", delta: { type: "text_delta", text: piece } } });
-  }
+if (prompt.includes("MULTI_BLOCK")) {
+  // An earlier turn that ended in a tool call, and a sub-agent's message: not part of the final reply.
+  assistant("msg_early", { type: "text", text: "EARLIER_TURN" });
+  assistant("msg_early", { type: "tool_use", id: "toolu_x", name: "Task", input: {} });
+  assistant("msg_sub", { type: "text", text: "SUBAGENT" }, "toolu_x");
 }
+if (args.includes("--include-partial-messages")) {
+  // A sub-agent delta that must NOT reach the client.
+  out({ type: "stream_event", parent_tool_use_id: "toolu_x", event: { type: "content_block_delta", delta: { type: "text_delta", text: "SUBAGENT" } } });
+  const stream = (event) => out({ type: "stream_event", parent_tool_use_id: null, event });
+  reply.forEach((b, index) => {
+    stream({ type: "content_block_start", index, content_block: { ...b, [b.type]: "" } });
+    for (const piece of b[b.type].match(/.{1,20}/gs)) {
+      const delta = b.type === "text" ? { type: "text_delta", text: piece } : { type: "thinking_delta", thinking: piece };
+      stream({ type: "content_block_delta", index, delta });
+    }
+    stream({ type: "content_block_stop", index });
+  });
+}
+for (const b of reply) assistant("msg_final", b);
 if (prompt.includes("FAIL_MIDSTREAM")) fail("Claude broke off mid-reply");
 out({
   type: "result",
   is_error: false,
-  result: structured ? JSON.stringify(structured) : text,
+  result: structured ? JSON.stringify(structured) : finalText,
   ...(structured ? { structured_output: structured } : {}),
   usage: { input_tokens: 3, cache_read_input_tokens: 10, cache_creation_input_tokens: 0, output_tokens: 7 },
   modelUsage: { [`claude-${model}-test`]: {} },
