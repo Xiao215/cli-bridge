@@ -20,6 +20,8 @@ import { checkGeminiLogin, geminiModels } from "./lib/gemini.mjs";
 import { anthropicErrorType, messages } from "./lib/anthropic.mjs";
 import { chatCompletions } from "./lib/openai.mjs";
 import { HttpError, disconnectSignal, readJson, sendJson } from "./lib/http.mjs";
+import { handleMcp, pausedCount } from "./lib/claude-run.mjs";
+import { maxTokensOf, warn } from "./lib/params.mjs";
 
 const LOOPBACK = ["127.0.0.1", "localhost", "::1"];
 if (!LOOPBACK.includes(HOST) && !API_KEY) {
@@ -34,6 +36,9 @@ async function ask(req, res) {
   const body = await readJson(req);
   if (!body.prompt || typeof body.prompt !== "string") throw new HttpError(400, 'Send JSON like {"prompt": "hi"}');
   const model = resolveModel(body.model);
+  const warnings = [];
+  const maxTokens = maxTokensOf(body.max_tokens, { gemini: isGemini(model), warnings });
+  warn(res, warnings);
   const result = await runModel({
     system: body.system || DEFAULT_SYSTEM,
     content: [{ type: "text", text: body.prompt }],
@@ -44,6 +49,7 @@ async function ask(req, res) {
     maxTurns: maxTurnsOf(body.max_turns),
     effort: effortOf(body.effort),
     webSearch: body.web_search === true,
+    maxTokens,
   });
   const u = usageOf(result);
   sendJson(res, 200, {
@@ -51,6 +57,8 @@ async function ask(req, res) {
     model: modelOf(result, model),
     usage: { prompt_tokens: u.input, completion_tokens: u.output, total_tokens: u.input + u.output },
     duration_ms: result.duration_ms,
+    ...(result.stop === "length" ? { stop_reason: "length" } : {}),
+    ...(warnings.length ? { warnings } : {}),
   });
 }
 
@@ -110,14 +118,17 @@ const server = http.createServer(async (req, res) => {
   const route = `${req.method} ${url.pathname.replace(/\/+$/, "")}`;
   const started = Date.now();
   res.on("finish", () => {
-    if (route === "GET /health") return;
+    if (route === "GET /health" || url.pathname.startsWith("/mcp/")) return;
     responses[res.statusCode] = (responses[res.statusCode] || 0) + 1;
     console.log(`${route} ${res.statusCode} ${Date.now() - started}ms`);
   });
   try {
     if (route === "GET /health" || route === "GET ") {
-      return sendJson(res, 200, { ok: true, default_model: DEFAULT_MODEL, tools: TOOLS || "none", ...liveStats() });
+      return sendJson(res, 200, { ok: true, default_model: DEFAULT_MODEL, tools: TOOLS || "none", ...liveStats(), paused: pausedCount() });
     }
+    // The MCP server that serves a run's own tools to its claude process.
+    const mcp = /^\/mcp\/([0-9a-f]{32})$/.exec(url.pathname);
+    if (mcp) return handleMcp(req, res, mcp[1]);
     const origin = req.headers.origin;
     if (origin && !ALLOWED_ORIGINS.has(origin)) {
       throw new HttpError(403, `Requests from web pages (${origin}) are refused; add it to ALLOWED_ORIGINS to allow`, "permission_error");

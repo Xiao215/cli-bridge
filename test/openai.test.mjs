@@ -3,7 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PNG, parseSSE, useServer } from "./helpers.mjs";
 
-const { post } = useServer(18788);
+// Tools here are the described ones (StructuredOutput); native tools are in native.test.mjs.
+const { post } = useServer(18788, { NATIVE_TOOLS: "0" });
 const chat = (body) => post("/v1/chat/completions", body);
 const user = (content) => [{ role: "user", content }];
 const WEATHER = {

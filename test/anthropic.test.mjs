@@ -3,7 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { KEY, PNG, parseSSE, useServer } from "./helpers.mjs";
 
-const { post } = useServer(18789);
+// Tools here are the described ones (StructuredOutput); native tools are in native.test.mjs.
+const { post } = useServer(18789, { NATIVE_TOOLS: "0" });
 // Sent the way the Anthropic SDKs send it.
 const messages = (body) =>
   post("/v1/messages", { max_tokens: 1024, ...body }, { Authorization: "", "x-api-key": KEY, "anthropic-version": "2023-06-01" });

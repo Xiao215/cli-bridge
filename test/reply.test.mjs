@@ -4,7 +4,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseSSE, useServer } from "./helpers.mjs";
 
-const { post } = useServer(18797);
+// Tools here are the described ones (StructuredOutput); native tools are in native.test.mjs.
+const { post } = useServer(18797, { NATIVE_TOOLS: "0" });
 const noThinking = useServer(18798, { THINKING_SUMMARIES: "0" });
 const user = (content) => [{ role: "user", content }];
 

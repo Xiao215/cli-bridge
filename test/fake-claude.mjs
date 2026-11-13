@@ -2,6 +2,7 @@
 // Stand-in for the `claude` CLI so tests run offline and don't use your limits.
 // Echoes back what it received; magic words in the prompt trigger failure modes.
 import { appendFileSync, readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 
 const args = process.argv.slice(2);
 if (args[0] === "auth") {
@@ -30,6 +31,19 @@ if (prompt.includes("FAIL_LOGIN")) fail("Not logged in · Please run /login");
 if (prompt.includes("FAIL_LIMIT")) fail("You've hit your usage limit · resets 5pm");
 
 const mcpFile = opt("--mcp-config");
+// The bridge's own MCP server for the caller's tools: connect and list them, as the CLI does.
+const callerUrl = mcpFile && JSON.parse(readFileSync(mcpFile, "utf8")).mcpServers?.caller?.url;
+let rpcId = 0;
+const rpc = async (method, params = {}) => {
+  const r = await fetch(callerUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: ++rpcId, method, params }) });
+  return (await r.json()).result;
+};
+let callerTools = null;
+if (callerUrl) {
+  await rpc("initialize", { protocolVersion: "2025-11-25" });
+  await fetch(callerUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) });
+  callerTools = (await rpc("tools/list")).tools;
+}
 const extras = mcpFile
   ? ` mcp=${readFileSync(mcpFile, "utf8")} allowed=${JSON.stringify(opt("--allowedTools"))} turns=${JSON.stringify(opt("--max-turns"))}`
   : "";
@@ -37,7 +51,56 @@ const text =
   `echo model=${model} effort=${opt("--effort") ?? ""} tools=${JSON.stringify(opt("--tools"))} images=${JSON.stringify(images)} ` +
   (documents.length ? `documents=${JSON.stringify(documents)} ` : "") +
   `anthropic_env=${JSON.stringify(Object.keys(process.env).filter((k) => k.startsWith("ANTHROPIC_")))} ` +
-  `thinking_display=${opt("--thinking-display") ?? ""} system=${JSON.stringify(system)} prompt=${JSON.stringify(prompt)}${extras}`;
+  `thinking_display=${opt("--thinking-display") ?? ""} ` +
+  (process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS ? `max_output_tokens=${process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS} ` : "") +
+  `system=${JSON.stringify(system)} prompt=${JSON.stringify(prompt)}${extras}` +
+  (callerTools ? ` native_tools=${JSON.stringify(callerTools)}` : "");
+
+const stream = (event) => out({ type: "stream_event", parent_tool_use_id: null, event });
+// One whole message as stream-json prints it: start, each block (also as an
+// `assistant` event), the stop reason with the message's usage, stop.
+const message = (id, blocks, stop_reason, usage) => {
+  stream({ type: "message_start", message: { id, model: `claude-${model}-test` } });
+  for (const b of blocks) out({ type: "assistant", message: { id, model: `claude-${model}-test`, role: "assistant", content: [b] }, parent_tool_use_id: null });
+  stream({ type: "message_delta", delta: { stop_reason }, usage });
+  stream({ type: "message_stop" });
+};
+
+// LONG: Claude hits max_tokens and, like the real CLI, is told to carry on.
+// The bridge must stop it at the first cut.
+if (prompt.includes("LONG") && process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS) {
+  out({ type: "system", subtype: "init", model: `claude-${model}-test` });
+  message("msg_cut", [{ type: "thinking", thinking: "Counting." }, { type: "text", text: `1 2 3 (cap ${process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS})` }], "max_tokens", { input_tokens: 3, output_tokens: 40 });
+  out({ type: "user", message: { role: "user", content: [{ type: "text", text: "Output token limit hit. Resume directly." }] }, parent_tool_use_id: null });
+  await new Promise((r) => setTimeout(r, 3000));
+  message("msg_more", [{ type: "text", text: "4 5 6 SHOULD_NOT_APPEAR" }], "end_turn", { input_tokens: 3, output_tokens: 40 });
+  out({ type: "result", is_error: false, result: "API Error: SHOULD_NOT_APPEAR", usage: { input_tokens: 6, output_tokens: 80 }, modelUsage: {} });
+  process.exit(0);
+}
+
+// NATIVE_CALL (or CALL_TOOL) with the caller's tools served natively: call the
+// first one (NATIVE_TWO: twice), wait on each call's MCP result as the CLI
+// does, then answer with the results. Not again once results are in the
+// transcript (a run continued from scratch).
+if (callerTools && /NATIVE_CALL|CALL_TOOL/.test(prompt) && !prompt.includes("<tool_result")) {
+  out({ type: "system", subtype: "init", model: `claude-${model}-test` });
+  const name = `mcp__caller__${callerTools[0].name}`;
+  const calls = [{ type: "tool_use", id: `toolu_${randomBytes(6).toString("hex")}`, name, input: { city: "Paris" } }];
+  if (prompt.includes("NATIVE_TWO")) calls.push({ type: "tool_use", id: `toolu_${randomBytes(6).toString("hex")}`, name, input: { city: "Rome" } });
+  const note = `Let me check. instructions=${system.includes("# Tools")}`;
+  message("msg_call", [{ type: "thinking", thinking: "Need the weather." }, { type: "text", text: note }, ...calls], "tool_use", { input_tokens: 4, output_tokens: 5 });
+  const results = [];
+  for (const c of calls) {
+    const r = await rpc("tools/call", { name: callerTools[0].name, arguments: c.input, _meta: { "claudecode/toolUseId": c.id } });
+    const said = r.content.map((x) => (x.type === "image" ? `[image ${x.mimeType}]` : x.text)).join("") + (r.isError ? " (error)" : "");
+    results.push(said);
+    out({ type: "user", message: { role: "user", content: [{ tool_use_id: c.id, type: "tool_result", content: r.content }] }, parent_tool_use_id: null });
+  }
+  const answer = `Weather: ${results.join("; ")}`;
+  message("msg_answer", [{ type: "text", text: answer }], "end_turn", { input_tokens: 6, output_tokens: 7 });
+  out({ type: "result", is_error: false, result: answer, usage: { input_tokens: 10, output_tokens: 12 }, modelUsage: { [`claude-${model}-test`]: {} }, duration_ms: 1 });
+  process.exit(0);
+}
 
 // With tools offered (a schema with tool_calls), CALL_TOOL makes it call the
 // first tool it's allowed to; otherwise it replies in `content`.

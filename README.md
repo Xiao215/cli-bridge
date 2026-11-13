@@ -33,7 +33,10 @@ point it at Anthropic's API rather than at this service.
 - **OpenAI** `POST /v1/chat/completions` and **Anthropic** `POST /v1/messages`, plus a
   minimal `POST /ask`
 - Streaming (server-sent events, in each API's own event format)
-- **Tool / function calling**: `tools`, `tool_choice`, tool results sent back in history
+- **Tool / function calling**: `tools`, `tool_choice`, tool results sent back in history.
+  Claude gets your tools as real tools, not as a description
+- `max_tokens`, with `finish_reason: "length"` / `stop_reason: "max_tokens"` when it's hit
+- Settings the CLIs can't apply (`temperature`, `stop`, `seed`, …) come back as warnings
 - **Images and PDFs** (base64 / `data:` URLs)
 - **Structured JSON output** validated against a JSON Schema
 - Thinking effort per request
@@ -191,12 +194,27 @@ msgs += [r.choices[0].message, {"role": "tool", "tool_call_id": call.id, "conten
 r = client.chat.completions.create(model="haiku", messages=msgs, tools=tools)
 ```
 
-Claude Code doesn't support client-side tools itself, so this service emulates them:
-your tools are described in the system prompt as ones the caller runs, Claude answers
-through a JSON schema that is either a reply or a list of calls, and the arguments are
-validated against each tool's `parameters`. With tools offered, the
-reply arrives in one piece at the end even when streaming.
-If Claude writes text before giving that answer (sometimes its whole reply, followed by
+Claude gets your tools as real tools. Claude Code can't take tool definitions directly,
+so this service serves them to it from a small MCP server of its own (Claude sees them
+as `mcp__caller__<name>`; replies use your names). When Claude calls them, the calls come
+back to you and its process waits. Your next request, carrying the results, continues
+that same process, so Claude sees real tool calls and real results all the way through,
+and the final reply is plain text, as on the API. Tool call ids are Claude's own
+(`toolu_…`) in both formats.
+
+A process waits `PAUSE_SECONDS` (default 300) for your results, and at most `MAX_PAUSED`
+(default 4) wait at once, oldest stopped first, since each holds memory. Results that
+arrive later, for calls no process is waiting on, or with different settings (model,
+system prompt, tools, effort, `max_tokens`) still work: they start a new process with the
+conversation so far as a transcript.
+
+Real tools can't be forced, so `tool_choice` `required`/`any` or a named tool, turning
+off parallel calls, and tools together with a reply schema use the older emulation:
+your tools are described in the system prompt, Claude answers through a JSON schema that
+is either a reply or a list of calls, and the arguments are validated against each tool's
+`parameters`. Gemini models always use it, and `NATIVE_TOOLS=0` makes Claude use it too.
+With the emulation, the reply arrives in one piece at the end even when streaming. If
+Claude writes text before giving that answer (sometimes its whole reply, followed by
 only a note like "See the answer above."), the text comes back first, then the note.
 
 Tools and a structured reply work together, as on the real APIs: pass `tools` with
@@ -237,6 +255,19 @@ data = json.loads(r.choices[0].message.content)
 Anthropic: `output_config={"format": {"type": "json_schema", "schema": {...}}}`.
 `/ask`: `"json_schema": {...}`. OpenAI's `{"type": "json_object"}` is also accepted.
 
+### max_tokens and settings that can't be applied
+
+`max_tokens` (OpenAI's `max_completion_tokens` wins over it) caps each reply, as on the
+API: a reply cut there ends with `finish_reason: "length"` (Anthropic: `stop_reason:
+"max_tokens"`; `/ask`: `"stop_reason": "length"`). Claude Code would otherwise carry on
+by itself after the cut, so the process is stopped there. Gemini models can't be capped.
+
+Neither CLI can set `temperature`, `top_p`, `top_k`, `stop`/`stop_sequences`, `seed`,
+penalties, `logit_bias`, log probabilities, `n` or Anthropic's `thinking` (use effort).
+A request that sets one (to anything but the value that applies anyway, like
+`temperature: 1`) still runs, and each is reported back as a warning: in a `Warning`
+header (`299 cli-bridge "…"`), in a `warnings` list in the JSON reply, and in the log.
+
 ### Thinking effort
 
 OpenAI's `reasoning_effort`, Anthropic's `output_config.effort`, or `effort` on `/ask`:
@@ -266,10 +297,10 @@ server is where you decide how much of your data an agent can reach.
 |---|---|
 | `POST /v1/chat/completions` | OpenAI chat format |
 | `POST /v1/messages` | Anthropic Messages format |
-| `POST /ask` | `{"prompt", "system"?, "model"?, "json_schema"?, "effort"?, "web_search"?}` → `{"reply", "model", "usage"}` |
+| `POST /ask` | `{"prompt", "system"?, "model"?, "json_schema"?, "effort"?, "web_search"?, "max_tokens"?}` → `{"reply", "model", "usage"}` |
 | `GET /v1/models` | Model aliases, in OpenAI or Anthropic shape (by `anthropic-version` header) |
 | `GET /stats` | Requests, errors, tokens per model, and your plan usage (`plan.windows`) as of the last request |
-| `GET /health` | Status, no auth |
+| `GET /health` | Status, no auth; `paused` is how many processes wait for tool results |
 
 ## Configuration (`.env`)
 
@@ -285,7 +316,10 @@ server is where you decide how much of your data an agent can reach.
 | `EFFORT` | CLI default | `low` … `max` thinking effort |
 | `THINKING_SUMMARIES` | on | Return summaries of Claude's thinking as `reasoning_content`; `0` to turn off |
 | `MAX_CONCURRENT` | `2` | Extra requests wait in line |
-| `TIMEOUT_SECONDS` | `300` | |
+| `TIMEOUT_SECONDS` | `300` | Per request |
+| `NATIVE_TOOLS` | on | Your tools as real tools for Claude; `0` to describe them in the system prompt instead |
+| `PAUSE_SECONDS` | `300` | How long a process waits for your tool results |
+| `MAX_PAUSED` | `4` | How many processes may wait for tool results at once |
 | `ALLOWED_ORIGINS` | none | Requests carrying a browser `Origin` are refused unless listed, so a web page can't spend your subscription |
 | `CLAUDE_CLI` | `claude` | Full path, if it isn't on `PATH` |
 | `AGY_CLI` | `agy` | The Antigravity CLI, for `gemini-*` models. Full path if it isn't on `PATH` (e.g. `~/.local/bin/agy` under a background service) |
