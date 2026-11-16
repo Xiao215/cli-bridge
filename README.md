@@ -208,6 +208,12 @@ arrive later, for calls no process is waiting on, or with different settings (mo
 system prompt, tools, effort, `max_tokens`) still work: they start a new process with the
 conversation so far as a transcript.
 
+A reply that left a process waiting names it in `paused_run` (beside `choices`, or in
+the last chunk and Anthropic's `message_delta` when streaming). A caller that won't send
+those results, because a call ended its conversation or it gave up, can let the process
+go at once with `DELETE /v1/paused_runs/<paused_run>` (204, or 404 once it's gone)
+instead of leaving it to wait out `PAUSE_SECONDS`.
+
 Real tools can't be forced, so `tool_choice` `required`/`any` or a named tool, turning
 off parallel calls, and tools together with a reply schema use the older emulation:
 your tools are described in the system prompt, Claude answers through a JSON schema that
@@ -298,6 +304,7 @@ server is where you decide how much of your data an agent can reach.
 | `POST /v1/chat/completions` | OpenAI chat format |
 | `POST /v1/messages` | Anthropic Messages format |
 | `POST /ask` | `{"prompt", "system"?, "model"?, "json_schema"?, "effort"?, "web_search"?, "max_tokens"?}` → `{"reply", "model", "usage"}` |
+| `DELETE /v1/paused_runs/<id>` | Stops a process waiting for tool results (`paused_run` in the reply that paused it); 204, or 404 |
 | `GET /v1/models` | Model aliases, in OpenAI or Anthropic shape (by `anthropic-version` header) |
 | `GET /stats` | Requests, errors, tokens per model, and your plan usage (`plan.windows`) as of the last request |
 | `GET /health` | Status, no auth; `paused` is how many processes wait for tool results |

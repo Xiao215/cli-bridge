@@ -20,7 +20,7 @@ import { checkGeminiLogin, geminiModels } from "./lib/gemini.mjs";
 import { anthropicErrorType, messages } from "./lib/anthropic.mjs";
 import { chatCompletions } from "./lib/openai.mjs";
 import { HttpError, disconnectSignal, readJson, sendJson } from "./lib/http.mjs";
-import { handleMcp, pausedCount } from "./lib/claude-run.mjs";
+import { handleMcp, pausedCount, releasePaused } from "./lib/claude-run.mjs";
 import { maxTokensOf, warn } from "./lib/params.mjs";
 
 const LOOPBACK = ["127.0.0.1", "localhost", "::1"];
@@ -143,6 +143,11 @@ const server = http.createServer(async (req, res) => {
     else if (route === "POST /ask") await ask(req, res);
     else if (route === "GET /v1/models") models(req, res);
     else if (route === "GET /stats") statsReport(res);
+    else if (req.method === "DELETE" && /^\/v1\/paused_runs\/[0-9a-f]{24}$/.test(url.pathname)) {
+      // A caller that won't send a paused run's results lets it go now, not after PAUSE_SECONDS.
+      if (!releasePaused(url.pathname.split("/").at(-1))) throw new HttpError(404, "No paused run with that id", "not_found_error");
+      res.writeHead(204).end();
+    }
     else throw new HttpError(404, `No route for ${req.method} ${url.pathname}`, "not_found_error");
   } catch (e) {
     sendError(res, e, url.pathname.startsWith("/v1/messages"));

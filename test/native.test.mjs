@@ -3,7 +3,7 @@
 // settings that can't be applied.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseSSE, useServer } from "./helpers.mjs";
+import { KEY, parseSSE, useServer } from "./helpers.mjs";
 
 const { base, post } = useServer(18799);
 const quick = useServer(18800, { PAUSE_SECONDS: "1" });
@@ -119,6 +119,27 @@ test("at most MAX_PAUSED runs wait; the oldest is stopped first", async () => {
   assert.match(late.choices[0].message.content, /<tool_result/);
   const kept = await (await one.post("/v1/chat/completions", { messages: b.followUp("20C"), tools: [WEATHER] })).json();
   assert.equal(kept.choices[0].message.content, "Weather: 20C");
+});
+
+test("a reply that paused names its run, and the caller can release it", async () => {
+  const { j, followUp } = await call({ post }, "NATIVE_CALL");
+  assert.match(j.paused_run, /^[0-9a-f]{24}$/);
+  assert.equal(await paused(), 1);
+  const del = (id, headers = { Authorization: `Bearer ${KEY}` }) => fetch(`${base}/v1/paused_runs/${id}`, { method: "DELETE", headers });
+  assert.equal((await del(j.paused_run, {})).status, 401);
+  assert.equal((await del(j.paused_run)).status, 204);
+  assert.equal(await paused(), 0);
+  assert.equal((await del(j.paused_run)).status, 404);
+  // Its results, sent after all, start over from the transcript.
+  const k = await (await post("/v1/chat/completions", { messages: followUp("18C"), tools: [WEATHER] })).json();
+  assert.match(k.choices[0].message.content, /<tool_result/);
+  assert.equal(k.paused_run, undefined);
+
+  const m = await (await post("/v1/messages", { max_tokens: 1000, messages: [user("NATIVE_CALL")], tools: [ANTHROPIC_WEATHER] })).json();
+  assert.equal((await del(m.paused_run)).status, 204);
+  const s = parseSSE(await (await post("/v1/chat/completions", { stream: true, messages: [user("NATIVE_CALL")], tools: [WEATHER] })).text()).map((e) => e.data).slice(0, -1);
+  assert.equal((await del(s.at(-1).paused_run)).status, 204);
+  assert.equal(await paused(), 0);
 });
 
 test("forced tool choice and Gemini keep the described tools", async () => {
