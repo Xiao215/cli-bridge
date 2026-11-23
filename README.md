@@ -241,6 +241,12 @@ or `web_fetch_tool_result` block once it returns. Those result blocks only mark 
 what Claude read stays inside Claude Code, and the reply text says what it found. Sent back in a
 later request, these blocks are accepted and left out.
 
+OpenAI's format has nothing for these, so a streamed `/v1/chat/completions` reply carries each one
+as a non-standard `web_tool` delta, once as it starts and once as it returns:
+`{"id", "name": "web_search", "input": {"query"}, "status": "running"}` (or `web_fetch` with
+`{"url"}`), then `{"id", "name", "status": "done" | "failed"}`. Clients that don't know the field
+ignore it.
+
 ### Images
 
 OpenAI: `{"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}`.

@@ -172,6 +172,20 @@ test("streaming: tool calls arrive as a tool_calls delta", async () => {
   assert.equal(chunks.at(-1).choices[0].finish_reason, "tool_calls");
 });
 
+test("streaming: Claude Code's web searches arrive as web_tool deltas, their findings left out", async () => {
+  const r = await chat({ stream: true, messages: user("WEB_SEARCH please"), web_search_options: {} });
+  const chunks = parseSSE(await r.text()).map((e) => e.data).slice(0, -1);
+  const web = chunks.map((c) => c.choices[0]?.delta?.web_tool).filter(Boolean);
+  assert.deepEqual(web.map((w) => [w.name, w.status]), [["web_search", "running"], ["web_search", "done"], ["web_fetch", "running"], ["web_fetch", "done"]]);
+  assert.deepEqual(web[0].input, { query: "Odda shops" });
+  // a fetch says only which page: its prompt is Claude's own working
+  assert.deepEqual(web[2].input, { url: "https://example.com/shop" });
+  assert.equal(web[1].id, web[0].id);
+  const thinking = chunks.map((c) => c.choices[0]?.delta?.reasoning_content ?? "").join("");
+  assert.match(thinking, /Checking the shop's page\./);
+  assert.doesNotMatch(JSON.stringify(chunks), /SECRET_RESULTS|SUBAGENT/);
+});
+
 test("streaming: a failure after text has started is reported as an error chunk", async () => {
   const r = await chat({ stream: true, messages: user("FAIL_MIDSTREAM") });
   assert.equal(r.status, 200);
