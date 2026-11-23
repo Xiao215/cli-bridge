@@ -235,6 +235,12 @@ web for that request only, with Claude Code's own WebSearch and WebFetch. `/ask`
 `"web_search": true`. Other requests stay without tools. `TOOLS=WebSearch,WebFetch` still turns
 it on for every request.
 
+When an Anthropic request streams, each search or fetch shows up live as a `server_tool_use` block
+(`web_search` with its `query`, `web_fetch` with its `url`), followed by a `web_search_tool_result`
+or `web_fetch_tool_result` block once it returns. Those result blocks only mark that it finished:
+what Claude read stays inside Claude Code, and the reply text says what it found. Sent back in a
+later request, these blocks are accepted and left out.
+
 ### Images
 
 OpenAI: `{"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}`.
@@ -281,7 +287,10 @@ OpenAI's `reasoning_effort`, Anthropic's `output_config.effort`, or `effort` on 
 
 Claude's thinking comes back as a summary in `reasoning_content` (OpenAI format, beside
 `content`, and as `reasoning_content` deltas when streaming). It is never part of the reply
-text. Set `THINKING_SUMMARIES=0` to leave it out. Gemini models return no thinking text.
+text. On the Anthropic endpoint, a streamed reply carries it as `thinking` blocks with
+`thinking_delta`s, as the real API does: between tool calls these are usually a sentence on what
+Claude found and will do next, handy as a progress line. Set `THINKING_SUMMARIES=0` to leave it
+out. Gemini models return no thinking text.
 
 ### Agents: attaching MCP tool servers (non-standard extension)
 

@@ -152,6 +152,26 @@ if (args.includes("--include-partial-messages")) {
   // A sub-agent delta that must NOT reach the client.
   out({ type: "stream_event", parent_tool_use_id: "toolu_x", event: { type: "content_block_delta", delta: { type: "text_delta", text: "SUBAGENT" } } });
   const stream = (event) => out({ type: "stream_event", parent_tool_use_id: null, event });
+  if (prompt.includes("WEB_SEARCH")) {
+    // Claude Code runs its own WebSearch, says what it'll do next, then fetches a page.
+    stream({ type: "message_start", message: { id: "msg_search", model: `claude-${model}-test` } });
+    stream({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_ws", name: "WebSearch", input: {} } });
+    for (const piece of ['{"query": "Odda ', 'shops"}']) stream({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: piece } });
+    stream({ type: "content_block_stop", index: 0 });
+    stream({ type: "message_stop" });
+    out({ type: "user", message: { role: "user", content: [{ tool_use_id: "toolu_ws", type: "tool_result", content: "Links: SECRET_RESULTS" }] }, parent_tool_use_id: null });
+    stream({ type: "message_start", message: { id: "msg_fetch", model: `claude-${model}-test` } });
+    stream({ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "", signature: "" } });
+    stream({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Checking the shop's page." } });
+    stream({ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "sig" } });
+    stream({ type: "content_block_stop", index: 0 });
+    stream({ type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "toolu_wf", name: "WebFetch", input: {} } });
+    stream({ type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"url": "https://example.com/shop", "prompt": "hours"}' } });
+    stream({ type: "content_block_stop", index: 1 });
+    stream({ type: "message_stop" });
+    out({ type: "user", message: { role: "user", content: [{ tool_use_id: "toolu_wf", type: "tool_result", content: "Open 07-23" }] }, parent_tool_use_id: null });
+    stream({ type: "message_start", message: { id: "msg_final", model: `claude-${model}-test` } });
+  }
   reply.forEach((b, index) => {
     stream({ type: "content_block_start", index, content_block: { ...b, [b.type]: "" } });
     for (const piece of b[b.type].match(/.{1,20}/gs)) {

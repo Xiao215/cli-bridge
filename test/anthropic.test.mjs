@@ -150,6 +150,32 @@ test("streaming: tool_use blocks with input_json_delta", async () => {
   assert.equal(events.find((e) => e.event === "message_delta").data.delta.stop_reason, "tool_use");
 });
 
+test("streaming: Claude Code's web searches and thinking pass through as server tool and thinking blocks", async () => {
+  const r = await messages({ stream: true, messages: user("WEB_SEARCH please"), tools: [{ type: "web_search_20260209", name: "web_search" }] });
+  const events = parseSSE(await r.text());
+  const starts = events.filter((e) => e.event === "content_block_start").map((e) => e.data);
+  assert.deepEqual(starts.map((b) => b.content_block.type),
+    ["server_tool_use", "web_search_tool_result", "thinking", "server_tool_use", "web_fetch_tool_result", "thinking", "text"]);
+  // block indexes count up from 0 with no gaps, and every block is closed
+  assert.deepEqual(starts.map((b) => b.index), [0, 1, 2, 3, 4, 5, 6]);
+  assert.equal(events.filter((e) => e.event === "content_block_stop").length, 7);
+  const search = starts[0].content_block;
+  assert.equal(search.name, "web_search");
+  const query = events.filter((e) => e.data.index === 0 && e.data.delta?.type === "input_json_delta").map((e) => e.data.delta.partial_json).join("");
+  assert.deepEqual(JSON.parse(query), { query: "Odda shops" });
+  assert.equal(starts[1].content_block.tool_use_id, search.id);
+  assert.deepEqual(starts[1].content_block.content, []);
+  assert.equal(starts[3].content_block.name, "web_fetch");
+  assert.equal(starts[4].content_block.content.url, "https://example.com/shop");
+  const thinking = events.filter((e) => e.data.delta?.type === "thinking_delta").map((e) => e.data.delta.thinking).join("|");
+  assert.match(thinking, /^Checking the shop's page\.\|hmm$/);
+  const all = JSON.stringify(events);
+  assert.doesNotMatch(all, /SECRET_RESULTS|signature_delta|SUBAGENT/);
+  // a caller sends those blocks back with the next request: they're accepted and left out
+  const back = await messages({ messages: [...user("WEB_SEARCH"), { role: "assistant", content: starts.slice(0, 5).map((b) => b.content_block) }, ...user("thanks")] });
+  assert.equal(back.status, 200);
+});
+
 test("errors use Anthropic's error shape", async () => {
   const bad = await messages({ messages: [] });
   assert.equal(bad.status, 400);
